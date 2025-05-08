@@ -3,6 +3,7 @@
 # Simplified UI & Logic: Only writes Premium and Withdrawal details to Excel.
 # CORRECTED: Uses single set of cells (F7/F8 assumed) for all withdrawal scenarios.
 # ADDED Debug prints for report byte sizes and PDF display
+# UPDATED: Removed verbose st.info messages, added st.spinner for loading.
 
 import streamlit as st
 # import pandas as pd
@@ -41,7 +42,7 @@ INPUT_CELL_MAP = {
 # --- REMOVE OLD MOCK FUNCTIONS ---
 
 # --- New Function to Orchestrate Scenarios using calculation_logic ---
-# (Keep this function as is from the previous version)
+# (Keep this function as is from the previous version - it uses print for console debug, not st for UI)
 def generate_all_scenarios(inputs):
     """
     Orchestrates the calculation for No Withdrawal, Withdrawal A, and Withdrawal B
@@ -86,10 +87,10 @@ def generate_all_scenarios(inputs):
     try:
         os.makedirs(temp_dir, exist_ok=True)
         print(f"--- DEBUG: Created temporary directory: {temp_dir} ---") # DEBUG
-        st.info(f"Created temporary directory: {temp_dir}")
+        # st.info(f"Created temporary directory: {temp_dir}") # Removed UI print
     except OSError as e:
         print(f"--- ERROR: Failed to create temporary directory {temp_dir}: {e} ---") # DEBUG
-        st.error(f"Failed to create temporary directory {temp_dir}: {e}")
+        st.error(f"無法創建臨時目錄 {temp_dir}: {e}") # Keep this error for UI
         return None
 
 
@@ -111,7 +112,7 @@ def generate_all_scenarios(inputs):
     )
     if results_no_withdrawal is None:
         print("--- ERROR: Calculation failed for 'No Withdrawal' scenario. ---") # DEBUG
-        st.error("Calculation failed for 'No Withdrawal' scenario.")
+        # Error will be shown by calculation_logic or caught by main try-except
         calculation_successful = False # Mark as failed
 
     # --- Run Scenario 2: Withdrawal A ---
@@ -128,7 +129,7 @@ def generate_all_scenarios(inputs):
         )
         if results_withdrawal_A is None:
             print("--- ERROR: Calculation failed for 'Withdrawal A' scenario. ---") # DEBUG
-            st.error("Calculation failed for 'Withdrawal A' scenario.")
+            # Error handling as above
 
     # --- Run Scenario 3: Withdrawal B ---
     if w_b_start > 0 and w_b_amount > 0 and calculation_successful:
@@ -144,11 +145,11 @@ def generate_all_scenarios(inputs):
         )
         if results_withdrawal_B is None:
             print("--- ERROR: Calculation failed for 'Withdrawal B' scenario. ---") # DEBUG
-            st.error("Calculation failed for 'Withdrawal B' scenario.")
+            # Error handling as above
 
     # --- Structure final results ---
     output_to_return = None
-    if results_no_withdrawal is not None:
+    if results_no_withdrawal is not None: # Check base scenario at least
         final_results = {"parameters": report_parameters, "無提取": results_no_withdrawal}
         if results_withdrawal_A is not None:
             final_results["提取方案 A"] = results_withdrawal_A
@@ -157,31 +158,33 @@ def generate_all_scenarios(inputs):
         output_to_return = final_results
         print("--- DEBUG: Successfully structured final results. ---") # DEBUG
     else:
-        print("--- DEBUG: Base scenario failed, returning None. ---") # DEBUG
+        # If even the base "No Withdrawal" scenario failed, indicate overall failure.
+        # Specific errors would have been logged/shown by run_calculation_scenario
+        print("--- DEBUG: Base 'No Withdrawal' scenario failed, or other critical failure. ---") # DEBUG
+        # No st.error here, handled by the caller's try-except block in app.py
 
     # Clean up temporary directory
     try:
         print(f"--- DEBUG: Attempting to clean up temp directory: {temp_dir} ---") # DEBUG
         shutil.rmtree(temp_dir)
         print(f"--- DEBUG: Cleaned up temporary directory: {temp_dir} ---") # DEBUG
-        st.info(f"Cleaned up temporary directory: {temp_dir}")
+        # st.info(f"Cleaned up temporary directory: {temp_dir}") # Removed UI print
     except Exception as e:
         print(f"--- WARNING: Could not clean up temp directory {temp_dir}: {e} ---") # DEBUG
-        st.warning(f"Could not clean up temp directory {temp_dir}: {e}")
+        # st.warning(f"Could not clean up temp directory {temp_dir}: {e}") # Removed UI print, log to console is enough
 
     print("--- DEBUG: Exiting generate_all_scenarios ---") # DEBUG
     return output_to_return
 
 
 # --- Streamlit App UI ---
-# (Keep UI section as is)
 st.set_page_config(layout="wide", page_title="保險計劃生成器")
 st.title("保誠保險計劃生成器")
 top_col1, top_col2, top_col3 = st.columns([0.7, 0.15, 0.15])
 st.markdown(f"""
 請在側邊欄輸入參數並點擊「計算計劃預測」。
 - **供款年期固定為 {FIXED_PAYMENT_YEARS} 年 (由Excel模板預設)。**
-- **計算引擎:** 使用 `TRST-toolbox-2025-04-20.xlsx` 配合 LibreOffice。
+- **計算引擎:** 使用 `TRST_Toolbox.xlsx` 配合 LibreOffice。
 - **注意:** 計算可能需要一些時間 (每次點擊約 1-3 分鐘)。
 """)
 def initialize_session_state():
@@ -195,6 +198,7 @@ def initialize_session_state():
         if key not in st.session_state:
             st.session_state[key] = default_value
 initialize_session_state()
+
 with st.sidebar:
     st.header("計劃參數")
     st.text_input("客戶名稱", value=st.session_state.client_name, key="client_name")
@@ -210,10 +214,9 @@ with st.sidebar:
     st.caption(f"報告將顯示第 {min(FIXED_REPORT_YEARS)} 年至第 {max(FIXED_REPORT_YEARS)} 年。")
     st.divider()
     calculate_button = st.button("計算計劃預測", type="primary", use_container_width=True, disabled=st.session_state.calculation_running, key="calc_button")
-    status_placeholder = st.empty()
+    status_placeholder = st.empty() # For final status messages after spinner
 
 # --- Main Area: Calculation Trigger ---
-# (Keep this block as is)
 if calculate_button and not st.session_state.calculation_running:
     print("--- DEBUG: Calculate button clicked and not already running. ---") # DEBUG
     valid_input = True
@@ -230,7 +233,8 @@ if calculate_button and not st.session_state.calculation_running:
         st.session_state['calculated_data'] = None
         st.session_state['pdf_bytes'] = None
         st.session_state['excel_bytes'] = None
-        print("--- DEBUG: Rerunning app to disable button and show status... ---") # DEBUG
+        status_placeholder.empty() # Clear previous validation errors
+        print("--- DEBUG: Rerunning app to disable button and show spinner... ---") # DEBUG
         st.rerun()
     else:
          print("--- DEBUG: Input invalid, not starting calculation. ---") # DEBUG
@@ -239,74 +243,71 @@ if calculate_button and not st.session_state.calculation_running:
 # --- Calculation Execution Block ---
 if st.session_state.calculation_running:
     print("--- DEBUG: calculation_running is True, entering execution block. ---") # DEBUG
-    with status_placeholder.container():
-        st.info("⏳ 計算中... 請稍候 (可能需要1-3分鐘)。")
-        st.info("請勿重複點擊按鈕。")
+    
+    with st.spinner("⏳ 計算中，請稍候... 生成報告可能需要1-3分鐘。請勿重複點擊按鈕。"):
+        current_inputs = {
+            'client_name': st.session_state.client_name, 'premium': st.session_state.premium,
+            'w_a_start': st.session_state.w_a_start, 'w_a_amount': st.session_state.w_a_amount,
+            'w_b_start': st.session_state.w_b_start, 'w_b_amount': st.session_state.w_b_amount,
+        }
+        print(f"--- DEBUG: Calling generate_all_scenarios with inputs: {current_inputs} ---") # DEBUG
 
-    current_inputs = {
-        'client_name': st.session_state.client_name, 'premium': st.session_state.premium,
-        'w_a_start': st.session_state.w_a_start, 'w_a_amount': st.session_state.w_a_amount,
-        'w_b_start': st.session_state.w_b_start, 'w_b_amount': st.session_state.w_b_amount,
-    }
-    print(f"--- DEBUG: Calling generate_all_scenarios with inputs: {current_inputs} ---") # DEBUG
+        try:
+            calculated_data_result = generate_all_scenarios(current_inputs)
+            print(f"--- DEBUG: generate_all_scenarios returned: {'Success' if calculated_data_result else 'Failure/None'} ---") # DEBUG
 
-    try:
-        calculated_data_result = generate_all_scenarios(current_inputs)
-        print(f"--- DEBUG: generate_all_scenarios returned: {'Success' if calculated_data_result else 'Failure/None'} ---") # DEBUG
+            if calculated_data_result:
+                st.session_state['calculated_data'] = calculated_data_result
+                # params = calculated_data_result.get('parameters', {}) # Not used for status messages here
+                print("--- DEBUG: Calculation successful, proceeding to report generation. ---") # DEBUG
 
-        if calculated_data_result:
-            st.session_state['calculated_data'] = calculated_data_result
-            params = calculated_data_result.get('parameters', {})
-            print("--- DEBUG: Calculation successful, proceeding to report generation. ---") # DEBUG
-
-            with status_placeholder.container():
-                st.info("✓ 計算完成。")
-                st.info("⏳ 正在生成 PDF 報告...")
+                # PDF Generation
                 print("--- DEBUG: Calling report_utils.create_plan_pdf ---") # DEBUG
                 pdf_bytes_result = report_utils.create_plan_pdf(calculated_data_result, EXCEL_TEMPLATE_PATH, STATIC_PDF_PATH)
-                # --- ADDED DEBUG ---
                 pdf_size = len(pdf_bytes_result) if pdf_bytes_result else 0
                 print(f"--- DEBUG: PDF generation result type: {type(pdf_bytes_result)}, size: {pdf_size} bytes ---")
-                # --- END DEBUG ---
                 st.session_state['pdf_bytes'] = pdf_bytes_result
-                if pdf_bytes_result: st.info("✓ PDF 報告已生成。")
-                else: st.warning("⚠️ PDF 報告生成失敗。")
-
-                st.info("⏳ 正在生成 Excel 報告...")
+                
+                # Excel Generation
                 print("--- DEBUG: Calling report_utils.create_plan_excel ---") # DEBUG
                 excel_bytes_result = report_utils.create_plan_excel(calculated_data_result, EXCEL_TEMPLATE_PATH)
-                # --- ADDED DEBUG ---
                 excel_size = len(excel_bytes_result) if excel_bytes_result else 0
                 print(f"--- DEBUG: Excel generation result type: {type(excel_bytes_result)}, size: {excel_size} bytes ---")
-                # --- END DEBUG ---
                 st.session_state['excel_bytes'] = excel_bytes_result
-                if excel_bytes_result: st.info("✓ Excel 報告已生成。")
-                else: st.warning("⚠️ Excel 報告生成失敗。")
 
-            if st.session_state['pdf_bytes'] or st.session_state['excel_bytes']:
-                 status_placeholder.success("✅ 報告生成完成！")
+                # Set final status messages AFTER spinner context
+                if pdf_bytes_result and excel_bytes_result:
+                    status_placeholder.success("✅ 報告生成完成！PDF 及 Excel 均已準備就緒。")
+                elif pdf_bytes_result: # Only PDF succeeded
+                    status_placeholder.warning("✅ PDF 報告已生成，但 Excel 報告生成失敗。")
+                elif excel_bytes_result: # Only Excel succeeded
+                    status_placeholder.warning("✅ Excel 報告已生成，但 PDF 報告生成失敗。")
+                else: # Both failed after calculation_data_result was initially true
+                    status_placeholder.error("❌ 計算完成，但 PDF 及 Excel 報告生成均失敗。")
             else:
-                 status_placeholder.error("❌ 計算完成，但 PDF 及 Excel 報告生成均失敗。")
+                # This else means generate_all_scenarios itself returned None (critical calculation failure)
+                print("--- DEBUG: Calculation failed (generate_all_scenarios returned None). ---") # DEBUG
+                status_placeholder.error("❌ 計算過程中發生嚴重錯誤，無法生成任何報告。請檢查輸入或稍後再試。")
+                st.session_state['calculated_data'] = None # Ensure clean state
+                st.session_state['pdf_bytes'] = None
+                st.session_state['excel_bytes'] = None
 
-        else:
-            print("--- DEBUG: Calculation failed (generate_all_scenarios returned None). ---") # DEBUG
-            status_placeholder.error("❌ 計算過程中發生錯誤，無法生成報告。")
+        except Exception as calc_err:
+            print(f"--- ERROR: Exception during calculation/report block: {calc_err} ---") # DEBUG
+            print(traceback.format_exc()) # Print detailed traceback to console
+            status_placeholder.error(f"❌ 處理計算或報告時發生意外錯誤。詳情請查看服務器日誌。") # User-friendly message
             st.session_state['calculated_data'] = None
             st.session_state['pdf_bytes'] = None
             st.session_state['excel_bytes'] = None
+        finally:
+            # This block runs regardless of success or failure within the try
+            print("--- DEBUG: Calculation execution block finished, setting calculation_running = False ---") # DEBUG
+            st.session_state.calculation_running = False
+            # The st.rerun() will happen after this 'if st.session_state.calculation_running:' block concludes.
 
-    except Exception as calc_err:
-        print(f"--- ERROR: Exception during calculation/report block: {calc_err} ---") # DEBUG
-        print(traceback.format_exc()) # Print detailed traceback to console
-        status_placeholder.error(f"❌ 處理計算或報告時發生意外錯誤: {calc_err}")
-        st.session_state['calculated_data'] = None
-        st.session_state['pdf_bytes'] = None
-        st.session_state['excel_bytes'] = None
-    finally:
-         print("--- DEBUG: Calculation execution block finished, setting calculation_running = False ---") # DEBUG
-         st.session_state.calculation_running = False
-         print("--- DEBUG: Rerunning app one last time... ---") # DEBUG
-         st.rerun()
+    # Rerun to update UI (remove spinner, show status_placeholder messages, enable button, display results)
+    print("--- DEBUG: Rerunning app one last time after calculation block... ---") # DEBUG
+    st.rerun()
 
 
 # --- Display PDF and Download Buttons ---
@@ -349,13 +350,13 @@ if st.session_state.get('calculated_data'):
         except Exception as e:
             print(f"--- ERROR: Displaying PDF failed: {e} ---") # DEBUG
             print(traceback.format_exc()) # Print detailed traceback
-            st.error(f"顯示 PDF 時出錯：{e}")
+            st.error(f"顯示 PDF 時出錯：{e}") # Keep this error for UI
     else:
          # Only show warning if calculation completed but PDF failed
-         if st.session_state.get('calculated_data'):
+         if st.session_state.get('calculated_data') and not st.session_state.get('excel_bytes'): # if excel also failed, a more general error was shown
              print("--- DEBUG: Calculated data exists, but no PDF bytes to display. ---") # DEBUG
-             st.warning("已完成計算，但無法載入 PDF 預覽。請嘗試下載 PDF (如有)。")
+             st.warning("已完成計算，但無法載入 PDF 預覽。請嘗試下載 PDF (如有)。") # Keep this warning
 
 # --- Footer ---
 st.divider()
-st.caption(f"保險計劃生成器 v0.9.2 - {datetime.date.today().year}") # Incremented version
+st.caption(f"保險計劃生成器 v0.9.3 - {datetime.date.today().year}") # Incremented version

@@ -3,6 +3,7 @@
 # Updated read_results_from_xlsx for specific cell locations.
 # ADDED MORE DEBUG PRINT STATEMENTS
 # ADDED Formula reading and explicit cell checks
+# UPDATED: Removed verbose st.info/st.write messages for cleaner UI. Kept st.error and critical st.warning.
 
 import streamlit as st # For displaying messages/errors during calculation
 import openpyxl
@@ -56,11 +57,43 @@ def find_soffice_path():
                     print(f"--- DEBUG (calc_logic): 'where' command failed or not found: {where_err} ---") # DEBUG
                     pass # Not found via 'where'
         elif platform.system() == "Darwin": # macOS
-             # (Keep macOS logic)
-             pass
+             print("--- DEBUG (calc_logic): Checking macOS paths... ---")
+             p = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+             if os.path.exists(p):
+                  print(f"--- DEBUG (calc_logic): Found at: {p} ---")
+                  path = p
+             if not path: # Try 'which' command as a fallback
+                try:
+                    result = subprocess.run(["which", "soffice"], capture_output=True, text=True, check=True)
+                    p_which = result.stdout.strip()
+                    if p_which and os.path.exists(p_which):
+                        print(f"--- DEBUG (calc_logic): Found via 'which': {p_which} ---")
+                        path = p_which
+                except (FileNotFoundError, subprocess.CalledProcessError) as e:
+                    print(f"--- DEBUG (calc_logic): 'which soffice' failed: {e} ---")
         else: # Linux/Other
-             # (Keep Linux logic)
-             pass
+             print("--- DEBUG (calc_logic): Checking Linux/Other paths using 'which'... ---")
+             try:
+                result = subprocess.run(["which", "soffice"], capture_output=True, text=True, check=True)
+                p_which = result.stdout.strip()
+                if p_which and os.path.exists(p_which):
+                    print(f"--- DEBUG (calc_logic): Found via 'which': {p_which} ---")
+                    path = p_which
+                else: # Check common install locations if 'which' fails or path is invalid
+                    common_paths = ["/usr/bin/soffice", "/usr/local/bin/soffice", "/opt/libreoffice/program/soffice", "/snap/bin/libreoffice.soffice"]
+                    for p_common in common_paths:
+                        if os.path.exists(p_common):
+                            print(f"--- DEBUG (calc_logic): Found in common path: {p_common} ---")
+                            path = p_common
+                            break
+             except (FileNotFoundError, subprocess.CalledProcessError) as e:
+                print(f"--- DEBUG (calc_logic): 'which soffice' failed: {e}. Will check common paths. ---")
+                common_paths = ["/usr/bin/soffice", "/usr/local/bin/soffice", "/opt/libreoffice/program/soffice", "/snap/bin/libreoffice.soffice"]
+                for p_common in common_paths:
+                    if os.path.exists(p_common):
+                        print(f"--- DEBUG (calc_logic): Found in common path: {p_common} ---")
+                        path = p_common
+                        break
     except Exception as e:
         print(f"--- ERROR (calc_logic): Exception in find_soffice_path: {e} ---") # DEBUG
         print(traceback.format_exc())
@@ -79,10 +112,10 @@ def read_results_from_xlsx(calculated_xlsx_path, report_years):
     """
     results = []
     print(f"--- DEBUG (calc_logic): Entering read_results_from_xlsx for: {calculated_xlsx_path} ---") # DEBUG
-    st.info(f"Attempting to read results from specific cells in: {calculated_xlsx_path}")
+    # st.info(f"Attempting to read results from specific cells in: {calculated_xlsx_path}") # Removed UI print
     if not os.path.exists(calculated_xlsx_path):
         print(f"--- ERROR (calc_logic): Calculated file not found: {calculated_xlsx_path} ---") # DEBUG
-        st.error(f"Calculated file not found: {calculated_xlsx_path}")
+        st.error(f"計算後的檔案未找到: {calculated_xlsx_path}") # Keep UI error
         return None
 
     workbook = None # Initialize workbook to None
@@ -99,13 +132,11 @@ def read_results_from_xlsx(calculated_xlsx_path, report_years):
             try:
                 g74_formula = sheet_formulas['G74'].value # If it's a formula, .value gives the string
                 print(f"--- DEBUG (calc_logic): Formula read from G74: {g74_formula} (Type: {type(g74_formula)}) ---") # DEBUG
-                # Check if it's actually a formula type
                 if sheet_formulas['G74'].data_type == 'f':
                      print("--- DEBUG (calc_logic): G74 data type is 'f' (formula). ---")
                 else:
                      print(f"--- DEBUG (calc_logic): G74 data type is '{sheet_formulas['G74'].data_type}'. ---")
 
-                # --- Explicitly check C37 and AH74 ---
                 c37_val_f = sheet_formulas['C37'].value
                 c37_dt_f = sheet_formulas['C37'].data_type
                 print(f"--- DEBUG (calc_logic): Read from C37 (formulas): Value={c37_val_f}, Type={c37_dt_f} ---")
@@ -122,13 +153,13 @@ def read_results_from_xlsx(calculated_xlsx_path, report_years):
         workbook = openpyxl.load_workbook(calculated_xlsx_path, data_only=True)
         if CALCULATOR_SHEET_NAME not in workbook.sheetnames:
             print(f"--- ERROR (calc_logic): Result Sheet '{CALCULATOR_SHEET_NAME}' not found (data read). ---") # DEBUG
+            st.error(f"結果工作表 '{CALCULATOR_SHEET_NAME}' 未在檔案 {os.path.basename(calculated_xlsx_path)} 中找到。") # Keep UI error
             workbook.close()
             return None
         sheet = workbook[CALCULATOR_SHEET_NAME]
         print(f"--- DEBUG (calc_logic): Successfully opened sheet '{CALCULATOR_SHEET_NAME}' for data reading. ---") # DEBUG
-        st.info(f"Successfully opened sheet '{CALCULATOR_SHEET_NAME}'.")
+        # st.info(f"Successfully opened sheet '{CALCULATOR_SHEET_NAME}'.") # Removed UI print
 
-        # --- Check C37 and AH74 values again with data_only=True ---
         try:
              c37_val_d = sheet['C37'].value
              print(f"--- DEBUG (calc_logic): Read from C37 (data_only): Value={c37_val_d} ---")
@@ -137,73 +168,69 @@ def read_results_from_xlsx(calculated_xlsx_path, report_years):
         except Exception as data_read_err:
              print(f"--- WARNING (calc_logic): Could not read cells C37/AH74 (data_only): {data_read_err} ---") # DEBUG
 
-
-        # --- Read results from mapped cells ---
         for year in report_years:
             if year in YEAR_TO_CELL_MAP:
                 cell_ref = YEAR_TO_CELL_MAP[year]
                 try:
                     cell_value = sheet[cell_ref].value
                     total_csv = float(cell_value) if cell_value is not None else 0.0
-                    print(f"--- DEBUG (calc_logic): Read year {year} from {cell_ref}: Value={cell_value}, Float={total_csv} ---") # DEBUG (Reduced frequency)
+                    # print(f"--- DEBUG (calc_logic): Read year {year} from {cell_ref}: Value={cell_value}, Float={total_csv} ---") 
                 except KeyError:
                      print(f"--- WARNING (calc_logic): Cell reference '{cell_ref}' for year {year} not found. ---") # DEBUG
-                     st.warning(f"Cell reference '{cell_ref}' for year {year} not found in the sheet. Using 0.0.")
+                     st.warning(f"儲存格參考 '{cell_ref}' (年份 {year}) 未在工作表中找到。將使用 0.0。") # Keep UI warning
                      total_csv = 0.0
                 except (ValueError, TypeError):
                     print(f"--- WARNING (calc_logic): Could not convert value '{cell_value}' from {cell_ref} (year {year}) to float. ---") # DEBUG
-                    st.warning(f"Could not convert value '{cell_value}' from cell {cell_ref} (year {year}) to float. Using 0.0.")
+                    st.warning(f"無法將儲存格 {cell_ref} (年份 {year}) 的值 '{cell_value}' 轉換為數字。將使用 0.0。") # Keep UI warning
                     total_csv = 0.0
                 results.append({'year': year, 'total_csv': round(total_csv, 2)})
             else:
                 print(f"--- WARNING (calc_logic): Report year {year} not found in YEAR_TO_CELL_MAP. ---") # DEBUG
-                st.warning(f"Report year {year} not found in YEAR_TO_CELL_MAP. Appending with 0.0.")
+                st.warning(f"報告年份 {year} 未在預期儲存格映射中找到。將附加 0.0。") # Keep UI warning
                 results.append({'year': year, 'total_csv': 0.0})
 
         workbook.close()
         print(f"--- DEBUG (calc_logic): Successfully read results for {len(results)} years. ---") # DEBUG
-        st.info(f"Successfully read results for {len(results)} years from specific cells.")
+        # st.info(f"Successfully read results for {len(results)} years from specific cells.") # Removed UI print
         return results
 
     except Exception as e:
         print(f"--- ERROR (calc_logic): Error reading results: {e} ---") # DEBUG
         print(traceback.format_exc()) # Print detailed traceback to console
-        st.error(f"Error reading results from {calculated_xlsx_path}: {e}")
-        st.error(traceback.format_exc())
+        st.error(f"讀取結果時發生錯誤 {calculated_xlsx_path}: {e}") # Keep UI error
+        # st.error(traceback.format_exc()) # Avoid showing full traceback in UI
         if 'workbook_formulas' in locals() and workbook_formulas: workbook_formulas.close()
         if workbook: workbook.close()
         return None
 
 
 # --- Main Function to Run a Calculation Scenario ---
-# (This function remains the same as the previous version - Intermediate ODS)
 def run_calculation_scenario(scenario_name, base_xlsx_path, temp_dir, scenario_params, cell_map, report_years):
     print(f"\n--- DEBUG (calc_logic): === ENTERING run_calculation_scenario for: {scenario_name} === ---")
-    st.info(f"--- Processing Scenario: {scenario_name} ---")
+    # st.info(f"--- Processing Scenario: {scenario_name} ---") # Removed UI print
     safe_scenario_name = "".join(c for c in scenario_name if c.isalnum() or c in (' ', '_')).rstrip().lower().replace(' ', '_')
     input_temp_xlsx_path = os.path.join(temp_dir, f"input_{safe_scenario_name}.xlsx")
     intermediate_ods_path = os.path.join(temp_dir, f"intermediate_{safe_scenario_name}.ods")
     calculated_temp_xlsx_path = os.path.join(temp_dir, f"calculated_{safe_scenario_name}.xlsx")
     libre_output_dir = temp_dir
 
-    # --- 1. Copy and Write Inputs to XLSX ---
-    workbook = None # Initialize workbook to None
+    workbook = None 
     try:
         print(f"--- DEBUG (calc_logic): Step 1: Copying and Writing Inputs for {scenario_name} ---") # DEBUG
         if not os.path.exists(base_xlsx_path):
              print(f"--- ERROR (calc_logic): Base calculator file not found: {base_xlsx_path} ---") # DEBUG
-             st.error(f"Base calculator file not found: {base_xlsx_path}")
+             st.error(f"基礎計算機檔案未找到: {base_xlsx_path}") # Keep UI error
              return None
         print(f"--- DEBUG (calc_logic): Copying template '{os.path.basename(base_xlsx_path)}' to '{os.path.basename(input_temp_xlsx_path)}' ---") # DEBUG
-        st.info(f"Copying template '{os.path.basename(base_xlsx_path)}' to '{os.path.basename(input_temp_xlsx_path)}'")
+        # st.info(f"Copying template '{os.path.basename(base_xlsx_path)}' to '{os.path.basename(input_temp_xlsx_path)}'") # Removed UI print
         shutil.copyfile(base_xlsx_path, input_temp_xlsx_path)
 
-        print("--- DEBUG (calc_logic): Writing inputs to spreadsheet... ---") # DEBUG (Changed message)
-        st.info("Writing inputs...")
+        print("--- DEBUG (calc_logic): Writing inputs to spreadsheet... ---") # DEBUG
+        # st.info("Writing inputs...") # Removed UI print
         workbook = openpyxl.load_workbook(input_temp_xlsx_path)
         if CALCULATOR_SHEET_NAME not in workbook.sheetnames:
             print(f"--- ERROR (calc_logic): Sheet '{CALCULATOR_SHEET_NAME}' not found. ---") # DEBUG
-            st.error(f"Sheet '{CALCULATOR_SHEET_NAME}' not found in {input_temp_xlsx_path}")
+            st.error(f"工作表 '{CALCULATOR_SHEET_NAME}' 未在 {input_temp_xlsx_path} 中找到。") # Keep UI error
             workbook.close()
             return None
         sheet = workbook[CALCULATOR_SHEET_NAME]
@@ -218,28 +245,27 @@ def run_calculation_scenario(scenario_name, base_xlsx_path, temp_dir, scenario_p
                         sheet[cell_ref] = str(value_to_write)
                 except Exception as write_err:
                      print(f"--- WARNING (calc_logic): Could not write '{param_name}' to cell {cell_ref}: {write_err} ---") # DEBUG
-                     st.warning(f"Could not write '{param_name}' to cell {cell_ref}: {write_err}")
+                     st.warning(f"無法將 '{param_name}' 寫入儲存格 {cell_ref}: {write_err}") # Keep UI warning
 
         workbook.save(input_temp_xlsx_path)
         workbook.close()
-        workbook = None # Ensure it's closed before LibreOffice tries to access it
+        workbook = None 
         print("--- DEBUG (calc_logic): Inputs written successfully. ---") # DEBUG
-        st.info("Inputs written successfully.")
+        # st.info("Inputs written successfully.") # Removed UI print
 
     except Exception as e:
         print(f"--- ERROR (calc_logic): Error preparing input file: {e} ---") # DEBUG
-        print(traceback.format_exc()) # Print detailed traceback to console
-        st.error(f"Error preparing input file for {scenario_name}: {e}")
-        st.error(traceback.format_exc())
+        print(traceback.format_exc()) 
+        st.error(f"準備輸入檔案時發生錯誤 ({scenario_name}): {e}") # Keep UI error
+        # st.error(traceback.format_exc()) # Avoid full traceback in UI
         if workbook: workbook.close()
         return None
 
-    # --- 2. Trigger Calculation with LibreOffice (Two Steps: XLSX -> ODS -> XLSX) ---
     print(f"--- DEBUG (calc_logic): Step 2: Triggering Calculation for {scenario_name} ---") # DEBUG
     soffice_path = find_soffice_path()
     if not soffice_path:
         print("--- ERROR (calc_logic): LibreOffice 'soffice' command not found. Cannot proceed. ---") # DEBUG
-        st.error("LibreOffice 'soffice' command not found. Cannot trigger calculation. Please ensure LibreOffice is installed and in the system PATH or standard location.")
+        st.error("找不到 LibreOffice 'soffice' 命令。無法觸發計算。請確保已安裝 LibreOffice 並將其添加到系統 PATH 或標準位置。") # Keep UI error
         return None
 
     if os.path.exists(intermediate_ods_path):
@@ -249,91 +275,88 @@ def run_calculation_scenario(scenario_name, base_xlsx_path, temp_dir, scenario_p
         try: os.remove(calculated_temp_xlsx_path)
         except OSError as e: print(f"Warning: Could not remove old XLSX file: {e}")
 
-    # --- Step 2a: Convert XLSX to ODS (Calculates and Saves as ODS) ---
     ods_conversion_successful = False
     soffice_command_ods = [ soffice_path, "--headless", "--invisible", "--nologo", "--convert-to", "ods", "--outdir", libre_output_dir, input_temp_xlsx_path ]
     try:
         print(f"--- DEBUG (calc_logic): Running LibreOffice command (XLSX -> ODS): {' '.join(soffice_command_ods)} ---") # DEBUG
-        st.info(f"Running LibreOffice (Step 1/2: XLSX -> ODS): {' '.join(soffice_command_ods)}")
+        # st.info(f"Running LibreOffice (Step 1/2: XLSX -> ODS): {' '.join(soffice_command_ods)}") # Removed UI print
         timeout_seconds = 90
         result_ods = subprocess.run(soffice_command_ods, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout_seconds, check=False)
-        print(f"--- DEBUG (calc_logic): LibreOffice (XLSX->ODS) finished. Return Code: {result_ods.returncode} ---") # DEBUG
-        print(f"--- DEBUG (calc_logic): LibreOffice (XLSX->ODS) stdout:\n{result_ods.stdout or 'None'}\n---") # DEBUG
-        print(f"--- DEBUG (calc_logic): LibreOffice (XLSX->ODS) stderr:\n{result_ods.stderr or 'None'}\n---") # DEBUG
+        print(f"--- DEBUG (calc_logic): LibreOffice (XLSX->ODS) finished. Return Code: {result_ods.returncode} ---")
+        print(f"--- DEBUG (calc_logic): LibreOffice (XLSX->ODS) stdout:\n{result_ods.stdout or 'None'}\n---")
+        print(f"--- DEBUG (calc_logic): LibreOffice (XLSX->ODS) stderr:\n{result_ods.stderr or 'None'}\n---")
 
         expected_ods_filename = os.path.splitext(os.path.basename(input_temp_xlsx_path))[0] + ".ods"
         expected_ods_path = os.path.join(libre_output_dir, expected_ods_filename)
-        print(f"--- DEBUG (calc_logic): Expecting intermediate ODS file at: {expected_ods_path} ---") # DEBUG
-        time.sleep(1) # Filesystem delay
+        print(f"--- DEBUG (calc_logic): Expecting intermediate ODS file at: {expected_ods_path} ---")
+        time.sleep(1) 
 
         if result_ods.returncode == 0 and os.path.exists(expected_ods_path):
-            print(f"--- DEBUG (calc_logic): Intermediate ODS conversion successful. File at: {expected_ods_path} ---") # DEBUG
+            print(f"--- DEBUG (calc_logic): Intermediate ODS conversion successful. File at: {expected_ods_path} ---")
             os.rename(expected_ods_path, intermediate_ods_path)
-            print(f"--- DEBUG (calc_logic): Renamed intermediate file to: {intermediate_ods_path} ---") # DEBUG
+            print(f"--- DEBUG (calc_logic): Renamed intermediate file to: {intermediate_ods_path} ---")
             ods_conversion_successful = True
         else:
-            st.error(f"LibreOffice failed during XLSX -> ODS conversion (RC={result_ods.returncode}). Cannot proceed.")
-            st.error(f"Stderr: {result_ods.stderr or 'None'}")
+            st.error(f"LibreOffice 在 XLSX -> ODS 轉換期間失敗 (RC={result_ods.returncode})。無法繼續。") # Keep UI error
+            st.error(f"Stderr: {result_ods.stderr or 'None'}") # Keep UI error
             return None
 
     except Exception as e:
         print(f"--- ERROR (calc_logic): Error during XLSX -> ODS conversion: {e} ---") # DEBUG
         print(traceback.format_exc())
-        st.error(f"Error during LibreOffice XLSX->ODS execution for {scenario_name}: {e}")
-        st.error(traceback.format_exc())
+        st.error(f"LibreOffice XLSX->ODS 執行期間發生錯誤 ({scenario_name}): {e}") # Keep UI error
+        # st.error(traceback.format_exc()) # Avoid full traceback in UI
         return None
 
-    # --- Step 2b: Convert ODS back to XLSX (Should be a cleaner save) ---
     if not ods_conversion_successful: return None
 
     xlsx_conversion_successful = False
     soffice_command_xlsx = [ soffice_path, "--headless", "--invisible", "--nologo", "--convert-to", "xlsx", "--outdir", libre_output_dir, intermediate_ods_path ]
     try:
         print(f"--- DEBUG (calc_logic): Running LibreOffice command (ODS -> XLSX): {' '.join(soffice_command_xlsx)} ---") # DEBUG
-        st.info(f"Running LibreOffice (Step 2/2: ODS -> XLSX): {' '.join(soffice_command_xlsx)}")
+        # st.info(f"Running LibreOffice (Step 2/2: ODS -> XLSX): {' '.join(soffice_command_xlsx)}") # Removed UI print
         timeout_seconds = 60
         result_xlsx = subprocess.run(soffice_command_xlsx, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout_seconds, check=False)
-        print(f"--- DEBUG (calc_logic): LibreOffice (ODS->XLSX) finished. Return Code: {result_xlsx.returncode} ---") # DEBUG
-        print(f"--- DEBUG (calc_logic): LibreOffice (ODS->XLSX) stdout:\n{result_xlsx.stdout or 'None'}\n---") # DEBUG
-        print(f"--- DEBUG (calc_logic): LibreOffice (ODS->XLSX) stderr:\n{result_xlsx.stderr or 'None'}\n---") # DEBUG
+        print(f"--- DEBUG (calc_logic): LibreOffice (ODS->XLSX) finished. Return Code: {result_xlsx.returncode} ---")
+        print(f"--- DEBUG (calc_logic): LibreOffice (ODS->XLSX) stdout:\n{result_xlsx.stdout or 'None'}\n---")
+        print(f"--- DEBUG (calc_logic): LibreOffice (ODS->XLSX) stderr:\n{result_xlsx.stderr or 'None'}\n---")
 
         expected_xlsx_filename = os.path.splitext(os.path.basename(intermediate_ods_path))[0] + ".xlsx"
         expected_xlsx_path = os.path.join(libre_output_dir, expected_xlsx_filename)
-        print(f"--- DEBUG (calc_logic): Expecting final XLSX file at: {expected_xlsx_path} ---") # DEBUG
-        time.sleep(1) # Filesystem delay
+        print(f"--- DEBUG (calc_logic): Expecting final XLSX file at: {expected_xlsx_path} ---")
+        time.sleep(1) 
 
         if result_xlsx.returncode == 0 and os.path.exists(expected_xlsx_path):
-            print(f"--- DEBUG (calc_logic): Final XLSX conversion successful. File at: {expected_xlsx_path} ---") # DEBUG
+            print(f"--- DEBUG (calc_logic): Final XLSX conversion successful. File at: {expected_xlsx_path} ---")
             os.rename(expected_xlsx_path, calculated_temp_xlsx_path)
-            print(f"--- DEBUG (calc_logic): Renamed final calculated file to: {calculated_temp_xlsx_path} ---") # DEBUG
+            print(f"--- DEBUG (calc_logic): Renamed final calculated file to: {calculated_temp_xlsx_path} ---")
             xlsx_conversion_successful = True
         else:
-            st.error(f"LibreOffice failed during ODS -> XLSX conversion (RC={result_xlsx.returncode}). Cannot proceed.")
-            st.error(f"Stderr: {result_xlsx.stderr or 'None'}")
+            st.error(f"LibreOffice 在 ODS -> XLSX 轉換期間失敗 (RC={result_xlsx.returncode})。無法繼續。") # Keep UI error
+            st.error(f"Stderr: {result_xlsx.stderr or 'None'}") # Keep UI error
             return None
 
     except Exception as e:
         print(f"--- ERROR (calc_logic): Error during ODS -> XLSX conversion: {e} ---") # DEBUG
         print(traceback.format_exc())
-        st.error(f"Error during LibreOffice ODS->XLSX execution for {scenario_name}: {e}")
-        st.error(traceback.format_exc())
+        st.error(f"LibreOffice ODS->XLSX 執行期間發生錯誤 ({scenario_name}): {e}") # Keep UI error
+        # st.error(traceback.format_exc()) # Avoid full traceback in UI
         return None
 
     try:
         if os.path.exists(intermediate_ods_path):
             os.remove(intermediate_ods_path)
-            print(f"--- DEBUG (calc_logic): Removed intermediate ODS file: {intermediate_ods_path} ---") # DEBUG
+            print(f"--- DEBUG (calc_logic): Removed intermediate ODS file: {intermediate_ods_path} ---")
     except Exception as e:
-        print(f"--- WARNING (calc_logic): Could not remove intermediate ODS file: {e} ---") # DEBUG
+        print(f"--- WARNING (calc_logic): Could not remove intermediate ODS file: {e} ---")
 
-    # --- 3. Read Results ---
     if not xlsx_conversion_successful:
         print(f"--- ERROR (calc_logic): Final XLSX conversion failed, cannot read results. ---") # DEBUG
         return None
 
     print(f"--- DEBUG (calc_logic): Step 3: Reading Results for {scenario_name} ---") # DEBUG
-    print(f"--- DEBUG (calc_logic): Reading results from final calculated file: {calculated_temp_xlsx_path} ---") # DEBUG
-    st.info(f"Reading results from calculated file: {calculated_temp_xlsx_path}")
+    print(f"--- DEBUG (calc_logic): Reading results from final calculated file: {calculated_temp_xlsx_path} ---")
+    # st.info(f"Reading results from calculated file: {calculated_temp_xlsx_path}") # Removed UI print
     final_results_list = read_results_from_xlsx(calculated_temp_xlsx_path, report_years)
 
     print(f"--- DEBUG (calc_logic): === EXITING run_calculation_scenario for: {scenario_name}. Returning results: {'Success' if final_results_list else 'Failure/None'} === ---") # DEBUG
